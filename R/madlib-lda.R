@@ -1,9 +1,9 @@
 
 setClass("lda.madlib")
 
-madlib.lda <- function (data, docid, words, topic_num,
-                        alpha, beta, iter_num = 20,
-                       ...) {
+madlib.lda <- function (data, topic_num, alpha, beta,
+    iter_num = 20, nstart = 1, ...) {
+
     if ( ! is( data, "db.obj" ) )
         stop( "madlib.lda can only be used on a db.obj object, ",
              "and ", deparse( substitute( documents ) ), " is not!")
@@ -13,17 +13,20 @@ madlib.lda <- function (data, docid, words, topic_num,
     db <- .get.dbms.str(conn.id)
     madlib <- schema.madlib(conn.id) # MADlib schema name
 
-    tbl.model <- .unique.string()
-    tbl.output <- .unique.string()
     tbl.tf <- .unique.string()
     tbl.source <- content(data)
 
-    ##query to get the data in appropriate format for lda_train
-    sql_tf <- paste("select ", madlib, ".term_frequency('",
-                tbl.source, "','", docid, "','", words, "','", tbl.tf, "',", TRUE,")",sep="")
+    sql_names <- paste("select * from ",tbl.source," limit 1")
 
-    db.q(sql_tf, nrows = 1,
-                conn.id = conn.id, verbose = FALSE)
+    col.names <- names(db.q(sql_names, conn.id=conn.id, verbose=FALSE))
+    docid <- col.names[1]
+    words <- col.names[2]
+
+    ##query to get the data in appropriate format for lda_train
+    sql_tf <- paste("select ", madlib, ".term_frequency('", tbl.source, "','",
+        docid, "','", words, "','", tbl.tf, "',", TRUE,")",sep="")
+
+    db.q(sql_tf, nrows = 1, conn.id = conn.id, verbose = FALSE)
 
     #compute vocabulary size
     sql_voc_size <- paste("select count(*) from ", tbl.tf, "_vocabulary", sep="")
@@ -33,14 +36,62 @@ madlib.lda <- function (data, docid, words, topic_num,
     vocabulary <- db.q(sql_voc, nrows = -1,conn.id = conn.id, verbose = FALSE)
     vocabulary <- t(vocabulary)
 
-    sql <- paste("select ", madlib, ".lda_train('",
+    obj <- .Machine$double.xmax
+    obji <- 0
+
+    for (i in seq_len(nstart)){
+
+        tbl.output <- paste("__madlib_pivotalr_lda_out",i,"__", sep="")
+        tbl.model <- paste("__madlib_pivotalr_lda_mod",i,"__", sep="")
+
+        db.q(paste( "DROP TABLE IF EXISTS ", tbl.output,
+                sep="" ), nrows = -1, conn.id = conn.id, verbose = FALSE)
+
+        db.q(paste( "DROP TABLE IF EXISTS ", tbl.model,
+                sep="" ), nrows = -1, conn.id = conn.id, verbose = FALSE)
+
+        sql_i <- paste("select ", madlib, ".lda_train('",
                  tbl.tf, "', '", tbl.model, "', '",
                  tbl.output, "',", voc_size, ", ",
                  topic_num, ",", iter_num, ",", alpha,
                  ",", beta, ")", sep = "")
 
-    res_out <- db.q(sql, "; select topic_count, topic_assignment from ", tbl.output, nrows = -1,
-                 conn.id = conn.id, verbose = FALSE)
+        res <- db.q(sql_i, "; select topic_count, topic_assignment from ",
+            tbl.output, nrows = -1,conn.id = conn.id, verbose=FALSE)
+
+        sql_perp <- paste("select ", madlib,
+                 ".lda_get_perplexity('", tbl.model,
+                 "','", tbl.output, "')", sep="")
+
+        perplexity <- db.q(sql_perp, nrows = -1, conn.id = conn.id, verbose = FALSE)
+        perplexity <- as.numeric(perplexity$lda_get_perplexity)
+        print(perplexity)
+
+        if ( perplexity < obj){
+
+            obj <- perplexity
+            obji <- i
+            res_out <- res
+        }
+
+    }
+
+    for (i in seq_len(nstart)){
+        if (i != obji){
+            tbl.output <- paste("__madlib_pivotalr_lda_out",i,"__", sep="")
+            tbl.model <- paste("__madlib_pivotalr_lda_mod",i,"__", sep="")
+            db.q(paste( "DROP TABLE IF EXISTS ", tbl.output,
+                sep="" ), nrows = -1, conn.id = conn.id, verbose = FALSE)
+
+            db.q(paste( "DROP TABLE IF EXISTS ", tbl.model,
+                sep="" ), nrows = -1, conn.id = conn.id, verbose = FALSE)
+        }
+    }
+
+
+    tbl.output <- paste("__madlib_pivotalr_lda_out",obji,"__",sep="")
+    tbl.model <- paste("__madlib_pivotalr_lda_mod",obji,"__",sep="")
+
 
     sql_parse_model <- paste("select (", madlib,
         ".lda_parse_model(model, voc_size, topic_num)).* from ", tbl.model, sep="")
@@ -67,7 +118,6 @@ madlib.lda <- function (data, docid, words, topic_num,
 
     assignments <- res_out$topic_assignment
     assignments <- lapply(assignments, arraydb.to.arrayr)
-
     rst <- list()
     rst$assignments <- assignments
     rst$topics <- topics

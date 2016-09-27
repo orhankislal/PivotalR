@@ -100,7 +100,7 @@ madlib.version <- function (conn.id = 1)
                                  "routine_schema = '", schema.madlib(conn.id),
                                  "'", sep = ""),
                            conn.id)[1,1]
-    if (exists == 1) 
+    if (exists == 1)
         res <- try(.db.getQuery(paste("select ", schema.madlib(conn.id),
                                       ".version()", sep = ""),
                                 conn.id), silent = TRUE)
@@ -123,7 +123,7 @@ madlib <- function (conn.id = 1)
 
 ## -----------------------------------------------------------------------
 
-## extract the version numbers 
+## extract the version numbers
 .madlib.version.number <- function (conn.id = 1)
 {
     version <- madlib.version(conn.id)
@@ -141,7 +141,7 @@ madlib <- function (conn.id = 1)
 
 ## -----------------------------------------------------------------------
 
-## Are the two connections equivalent? 
+## Are the two connections equivalent?
 conn.eql <- function (conn.id1, conn.id2)
 {
     if (!.is.conn.id.valid(conn.id1) || !.is.conn.id.valid(conn.id2))
